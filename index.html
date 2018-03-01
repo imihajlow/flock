@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        html, body {
+          width: 100%;
+          height: 100%;
+          margin: 0px;
+          border: 0;
+          overflow: hidden; /*  Disable scrollbars */
+          display: block;  /* No floating content on sides */
+        }
+    </style>
+    <title></title>
+</head>
+<body>
+    <canvas id="c" style='position:absolute; left:0px; top:0px;'></canvas>
+
+    <script type="text/javascript" src="Vector.js"> </script>
+    <script type="text/javascript">
+            var individualRadius = 5;
+            var friction = 0.1;
+            var maxForce = 10;
+            var foodNutrition = 300;
+            var kFood = 100;
+            var kNeighbourSpeed = 0.1;
+            var kNeighbourDistance = 0.5;
+            var kEnemy = 50000;
+            var flock = [];
+            var food = [];
+            var enemy = new Vector(0,0);
+            var addedFood = [];
+
+            var
+            // Obtain a reference to the canvas element using its id.
+            htmlCanvas = document.getElementById('c'),
+            // Obtain a graphics context on the canvas element for drawing.
+            context = htmlCanvas.getContext('2d'),
+            canvasData;
+
+            // Start listening to resize events and draw canvas.
+            initialize();
+
+            function initialize() {
+               // Register an event listener to call the resizeCanvas() function 
+               // each time the window is resized.
+               window.addEventListener('resize', resizeCanvas, false);
+               // Draw canvas border for the first time.
+               resizeCanvas();
+            }
+
+            function redraw() {
+                context.clearRect(0,0,htmlCanvas.width,htmlCanvas.width);
+                var i = 0;
+                for (i = 0; i < flock.length; ++i) {
+                    flock[i].draw();
+                }
+
+                for (i = 0; i < food.length; ++i) {
+                    context.save();
+                    context.translate(food[i].x, food[i].y);
+                    context.beginPath();
+                    context.arc(0,0,2,0,2*Math.PI);
+                    context.fillStyle = "blue";
+                    context.fill();
+                    context.restore();
+                }
+            }
+
+            // Runs each time the DOM window resize event fires.
+            // Resets the canvas dimensions to match window,
+            // then draws the new borders accordingly.
+            function resizeCanvas() {
+                htmlCanvas.width = window.innerWidth;
+                htmlCanvas.height = window.innerHeight;
+                redraw();
+            }
+
+            function clipToOne(v) {
+                return Math.min(Math.max(v, 0), 1);
+            }
+
+
+            function drawInd(position, direction, color) {
+                var r = individualRadius / 2;
+                context.save();
+                context.translate(position.x, position.y);
+                context.rotate(direction.getDirection());
+                context.beginPath();
+                context.moveTo(r * 2, 0);
+                context.lineTo(0, r);
+                context.arcTo(-r, r, -r, 0, r);
+                context.arcTo(-r, -r, 0, -r, r);
+                context.closePath();
+                context.fillStyle = color;
+                context.fill();
+                context.restore();
+            }
+
+            function rgb(r, g, b){
+                r = Math.floor(r);
+                g = Math.floor(g);
+                b = Math.floor(b);
+                return "rgb("+r+","+g+","+b+")";
+            }
+
+            var Individual = function(position, hunger) {
+                this.position = position || new Vector(0, 0);
+                this.hunger = hunger || 0;
+                this.speed = new Vector(Math.random() * 1 - 0.5, Math.random() * 1 - 0.5);
+                this.force = new Vector(0, 0);
+            };
+
+            Individual.prototype.draw = function() {
+                var r = this.hunger > 0 ? Math.min(this.hunger, 255) : 0;
+                var g = this.hunger < 0 ? Math.min(-this.hunger, 255) : 0;
+                drawInd(this.position, this.force.isZero() ? new Vector(1, 0) : this.force, rgb(r,g,0));
+            };
+
+            Individual.prototype.step = function(dt) {
+                var vFriction = new Vector(1,0);
+                vFriction.setDirection(this.speed.getDirection());
+                vFriction.multiplyBy(-1 * friction);
+                vFriction.multiplyBy(this.speed.getSquaredMagnitude());
+                this.speed.addScaledTo(this.force.add(vFriction), dt);
+                this.position.addScaledTo(this.speed, dt);
+            };
+
+            function collideIndividuals(p1, p2) {
+                if (p1.position.distanceTo(p2.position) < 2 * individualRadius) {
+                    var delta = p2.position.subtract(p1.position);
+                    // delta is pointing from p1 to p2
+                    delta.divideBy(2);
+                    var center = p1.position.add(delta);
+                    delta.setMagnitude(individualRadius);
+                    p1.position = center.subtract(delta);
+                    p2.position = center.add(delta);
+                }
+            }
+
+            function pairAttraction(p1, p2) {
+                var direction = p2.position.subtract(p1.position);
+                var distance = p1.position.distanceTo(p2.position);
+                direction.setMagnitude(0.1 * Math.log(distance / (individualRadius * 6)));
+                return direction;
+            }
+
+            function step(dt) {
+                var currentEnemy = enemy;
+                var foodMask = new Array(food.length);
+                var i = 0;
+
+                for (i = 0; i < food.length; ++i) {
+                    foodMask[i] = true;
+                }
+                for (i = 0; i < flock.length; ++i) {
+                    var j = 0;
+                    var intention = new Vector(0, 0);
+                    
+                    var neighbourSpeed = new Vector(0, 0);
+                    var attraction = new Vector(0, 0);
+                    for (j = 0; j < flock.length; ++j) {
+                        if (i != j) {
+                            neighbourSpeed.addScaledTo(flock[j].speed, individualRadius / flock[i].position.distanceTo(flock[j].position))
+                            attraction.addTo(pairAttraction(flock[i], flock[j]));
+                        }
+                    }
+                    for (j = 0; j < food.length; ++j) {
+                        if (food[j].distanceTo(flock[i].position) < individualRadius) {
+                            foodMask[j] = false;
+                            flock[i].hunger -= foodNutrition;
+                        } else {
+                            var foodDirection = food[j].subtract(flock[i].position);
+                            var foodAttraction = flock[i].hunger / foodDirection.getSquaredMagnitude();
+                            foodDirection.setMagnitude(foodAttraction);
+                            intention.addScaledTo(foodDirection, kFood);
+                        }
+                    }
+                    intention.addScaledTo(neighbourSpeed, kNeighbourSpeed);
+                    intention.addScaledTo(attraction, kNeighbourDistance);
+
+                    var enemyContrDirection = flock[i].position.subtract(currentEnemy);
+                    var enemySqrDistance = enemyContrDirection.getSquaredMagnitude();
+                    enemyContrDirection.setMagnitude(kEnemy / Math.pow(enemySqrDistance, 1.5));
+                    intention.addTo(enemyContrDirection);
+
+                    intention.multiplyBy(dt);
+                    flock[i].force = intention.limitMagnitude(maxForce);
+
+                    flock[i].step(dt);
+                    for (j = 0; j < flock.length; ++j) {
+                        if (i != j) {
+                            collideIndividuals(flock[i], flock[j]);
+                        }
+                    }
+                    flock[i].hunger += dt;
+                }
+
+                var newFood = [];
+                for (i = 0; i < food.length; ++i) {
+                    if (foodMask[i]) {
+                        newFood.push(food[i]);
+                    }
+                }
+                var addedFoodLength = addedFood.length;
+                for (i = 0; i < addedFoodLength; ++i) {
+                    newFood.push(addedFood[i]);
+                }
+                addedFood = addedFood.slice(addedFoodLength);
+                food = newFood;
+            }
+
+            function initFlock() {
+                var center = new Vector(htmlCanvas.width / 2, htmlCanvas.height / 2);
+                for (var i = 0; i < 20; ++i) {
+                    for (var j = 0; j < 5; ++j) {
+                        var p = new Individual(center.add(new Vector(i * 3.5 * individualRadius, j * 3.5 * individualRadius)), 100);
+                        flock.push(p);
+                    }
+                }
+            }
+
+            function addFood(v) {
+                addedFood.push(v);
+            }
+
+            initFlock();
+            redraw();
+
+            setInterval(function() { step(0.4); redraw(); }, 40);
+            setInterval(function() {
+                addFood(new Vector(Math.random() * htmlCanvas.width, Math.random() * htmlCanvas.height))
+            }, 500);
+            document.addEventListener("click", clickHandler, false);
+            document.addEventListener("mousemove", moveHandler, false);
+
+            function getMousePos(canvas, evt) {
+              var rect = canvas.getBoundingClientRect(), // abs. size of element
+                  scaleX = canvas.width / rect.width,    // relationship bitmap vs. element for X
+                  scaleY = canvas.height / rect.height;  // relationship bitmap vs. element for Y
+
+              return new Vector(
+                (evt.clientX - rect.left) * scaleX,   // scale mouse coordinates after they have
+                (evt.clientY - rect.top) * scaleY     // been adjusted to be relative to element
+              );
+            }
+
+            function clickHandler(ev) {
+                addFood(getMousePos(htmlCanvas, ev));
+            }
+
+            function moveHandler(ev) {
+                enemy = getMousePos(htmlCanvas, ev);
+            }
+    </script>
+</body>
+</html>
