@@ -22,10 +22,12 @@
             var friction = 0.1;
             var maxForce = 10;
             var foodNutrition = 300;
-            var kFood = 100;
-            var kNeighbourSpeed = 0.1;
-            var kNeighbourDistance = 0.5;
-            var kEnemy = 50000;
+            var kFood = 50;
+            var kNeighbourSpeed = 0.15;//0.15;
+            var kNeighbourDistance = 0.2;//0.2;
+            var kEnemy = 500000;
+            var deathThreshold = 2 * foodNutrition;
+            var birthThreshold = -foodNutrition * 0.95;
             var flock = [];
             var food = [];
             var enemy = new Vector(0,0);
@@ -65,6 +67,9 @@
                     context.fill();
                     context.restore();
                 }
+
+                context.font = "20px Arial";
+                context.fillText("" + flock.length, 10, 30);
             }
 
             // Runs each time the DOM window resize event fires.
@@ -112,8 +117,8 @@
             };
 
             Individual.prototype.draw = function() {
-                var r = this.hunger > 0 ? Math.min(this.hunger, 255) : 0;
-                var g = this.hunger < 0 ? Math.min(-this.hunger, 255) : 0;
+                var r = this.hunger > 0 ? Math.min(this.hunger * 255 / deathThreshold, 255) : 0;
+                var g = this.hunger < 0 ? Math.min(this.hunger * 255 / birthThreshold, 255) : 0;
                 drawInd(this.position, this.force.isZero() ? new Vector(1, 0) : this.force, rgb(r,g,0));
             };
 
@@ -139,9 +144,29 @@
             }
 
             function pairAttraction(p1, p2) {
+
+                var flog = function(d) {
+                    return 0.1 * Math.log(d / (individualRadius * 6));
+                };
+
+                var f2 = function(x) {
+                    var k1 = 100;
+                    var k2 = individualRadius * 6;
+                    return k1 * (x * x - k2) / Math.pow(x, 4);
+                };
+
+                var f3 = function(x) {
+                    var p = 4;
+                    var k = 0.1;
+                    var b = k * Math.pow(6 * individualRadius, p);
+                    return k - b / Math.pow(x, p);
+                }
+
+                var f = f3;
+
                 var direction = p2.position.subtract(p1.position);
                 var distance = p1.position.distanceTo(p2.position);
-                direction.setMagnitude(0.1 * Math.log(distance / (individualRadius * 6)));
+                direction.setMagnitude(f(distance));
                 return direction;
             }
 
@@ -172,6 +197,7 @@
                         } else {
                             var foodDirection = food[j].subtract(flock[i].position);
                             var foodAttraction = flock[i].hunger / foodDirection.getSquaredMagnitude();
+                            //var foodAttraction = Math.max(0, flock[i].hunger) / foodDirection.getSquaredMagnitude();
                             foodDirection.setMagnitude(foodAttraction);
                             intention.addScaledTo(foodDirection, kFood);
                         }
@@ -196,6 +222,31 @@
                     flock[i].hunger += dt;
                 }
 
+                var deathMask = new Array(flock.length);
+                var newborn = [];
+                for (i = 0; i < flock.length; ++i) {
+                    deathMask[i] = flock[i].hunger < deathThreshold;
+                    if (!deathMask[i]) {
+                        addFood(flock[i].position);
+                    }
+                    if (flock[i].hunger < birthThreshold) {
+                        flock[i].hunger += foodNutrition;
+                        var offset = new Vector(2 * individualRadius, 0);
+                        offset.setDirection(Math.random() * Math.PI * 2);
+                        newborn.push(new Individual(flock[i].position.add(offset), 0));
+                    }
+                }
+
+                var newFlock = [];
+                for (i = 0; i < flock.length; ++i) {
+                    if (deathMask[i]) {
+                        newFlock.push(flock[i]);
+                    }
+                }
+                newFlock.push.apply(newFlock, newborn);
+                flock = newFlock;
+
+
                 var newFood = [];
                 for (i = 0; i < food.length; ++i) {
                     if (foodMask[i]) {
@@ -213,8 +264,8 @@
             function initFlock() {
                 var center = new Vector(htmlCanvas.width / 2, htmlCanvas.height / 2);
                 for (var i = 0; i < 20; ++i) {
-                    for (var j = 0; j < 5; ++j) {
-                        var p = new Individual(center.add(new Vector(i * 3.5 * individualRadius, j * 3.5 * individualRadius)), 100);
+                    for (var j = 0; j < 10; ++j) {
+                        var p = new Individual(center.add(new Vector(i * 3.5 * individualRadius, j * 3.5 * individualRadius)), Math.random() * 100 + 50);
                         flock.push(p);
                     }
                 }
@@ -229,8 +280,11 @@
 
             setInterval(function() { step(0.4); redraw(); }, 40);
             setInterval(function() {
-                addFood(new Vector(Math.random() * htmlCanvas.width, Math.random() * htmlCanvas.height))
-            }, 500);
+                addFood(new Vector((Math.random() * 0.1 + 0.2) * htmlCanvas.width, (Math.random() * 0.1 + 0.45) * htmlCanvas.height));
+                addFood(new Vector((Math.random() * 0.1 + 0.8) * htmlCanvas.width, (Math.random() * 0.1 + 0.45) * htmlCanvas.height));
+                //addFood(new Vector(0.8 * htmlCanvas.width, 0.5 * htmlCanvas.height));
+                //addFood(new Vector(0.2  * htmlCanvas.width, 0.5 * htmlCanvas.height));
+            }, 400);
             document.addEventListener("click", clickHandler, false);
             document.addEventListener("mousemove", moveHandler, false);
 
